@@ -11,6 +11,18 @@ const cloudinaryConfigured =
 
 const useLocalStorage = env.IMAGE_STORAGE === "local";
 
+function resolveLocalUploadDirs(): { primaryDir: string; fallbackDir: string } {
+  const configured = String(env.LOCAL_UPLOAD_DIR || "uploads");
+  if (path.isAbsolute(configured)) {
+    return { primaryDir: configured, fallbackDir: configured };
+  }
+
+  const projectRootDir = path.resolve(__dirname, "..", "..");
+  const primaryDir = path.resolve(projectRootDir, configured);
+  const fallbackDir = path.resolve(process.cwd(), configured);
+  return { primaryDir, fallbackDir };
+}
+
 if (cloudinaryConfigured) {
   cloudinary.config({
     cloud_name: env.CLOUDINARY_CLOUD_NAME,
@@ -37,7 +49,7 @@ function extractExtension(name: string): string {
 }
 
 async function uploadLocalImageBuffer(buffer: Buffer, fileName: string): Promise<UploadedImage> {
-  const uploadDir = path.resolve(process.cwd(), env.LOCAL_UPLOAD_DIR);
+  const { primaryDir: uploadDir } = resolveLocalUploadDirs();
   await fs.mkdir(uploadDir, { recursive: true });
 
   const ext = extractExtension(fileName);
@@ -109,15 +121,21 @@ export async function deleteImage(publicId: string): Promise<void> {
   if (useLocalStorage) {
     if (!publicId) return;
 
-    const uploadDir = path.resolve(process.cwd(), env.LOCAL_UPLOAD_DIR);
     const baseName = path.basename(publicId);
-    const filePath = path.join(uploadDir, baseName);
+    const { primaryDir, fallbackDir } = resolveLocalUploadDirs();
+    const candidatePaths = Array.from(new Set([
+      path.join(primaryDir, baseName),
+      path.join(fallbackDir, baseName),
+    ]));
 
-    try {
-      await fs.unlink(filePath);
-    } catch (error: any) {
-      if (error?.code !== "ENOENT") {
-        throw error;
+    for (const filePath of candidatePaths) {
+      try {
+        await fs.unlink(filePath);
+        return;
+      } catch (error: any) {
+        if (error?.code !== "ENOENT") {
+          throw error;
+        }
       }
     }
     return;
