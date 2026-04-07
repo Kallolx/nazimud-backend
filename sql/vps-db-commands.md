@@ -5,19 +5,19 @@ Use these commands in order, from login to exit.
 ## 1) SSH into VPS
 
 ```bash
-ssh <VPS_USER>@<VPS_HOST>
+ssh azureuser@20.2.90.116
 ```
 
 Example:
 
 ```bash
-ssh ubuntu@123.45.67.89
+ssh azureuser@20.2.90.116
 ```
 
 ## 2) Go to backend folder
 
 ```bash
-cd /path/to/nazimud-master/backend
+cd ~/backseek-backend/backend
 ```
 
 ## 3) Load DB URL from `.env`
@@ -160,5 +160,10 @@ exit
 ## Optional: one-liner full flow
 
 ```bash
-ssh <VPS_USER>@<VPS_HOST> 'cd /path/to/nazimud-master/backend; export DATABASE_URL="$(grep '^DATABASE_URL=' .env | cut -d '=' -f2- | sed '"'"'s/^"//;s/"$//"'"')"; psql "$DATABASE_URL" -c "\dt"'
+ssh azureuser@20.2.90.116 'cd ~/backseek-backend/backend; export DATABASE_URL="$(grep '^DATABASE_URL=' .env | cut -d '=' -f2- | sed '"'"'s/^"//;s/"$//"'"')"; psql "$DATABASE_URL" -c "\dt"'
 ```
+
+## 12) Check uploaded image files on VPS
+
+cd /var/www/backseek/uploads
+ls

@@ -4,7 +4,7 @@ export async function requireAuth(request: FastifyRequest, reply: FastifyReply):
   try {
     await request.jwtVerify();
   } catch {
-    reply.code(401).send({ message: "Unauthorized" });
+    return reply.code(401).send({ message: "Unauthorized" });
   }
 }
 
@@ -12,9 +12,9 @@ export async function requireAdmin(request: FastifyRequest, reply: FastifyReply)
   try {
     await request.jwtVerify();
     if (request.user.role !== "ADMIN") {
-      reply.code(403).send({ message: "Admin access required" });
+      return reply.code(403).send({ message: "Admin access required" });
     }
   } catch {
-    reply.code(401).send({ message: "Unauthorized" });
+    return reply.code(401).send({ message: "Unauthorized" });
   }
 }
