@@ -20,6 +20,38 @@ function buildAllowedOrigins() {
     .map((item) => item.trim())
     .filter(Boolean);
 
+  function normalizeOrigin(value: string): string {
+    return String(value || "").trim().replace(/\/+$/, "").toLowerCase();
+  }
+
+  function isAllowedByPattern(origin: string, pattern: string): boolean {
+    const normalizedOrigin = normalizeOrigin(origin);
+    const normalizedPattern = normalizeOrigin(pattern);
+
+    if (!normalizedPattern) {
+      return false;
+    }
+
+    if (!normalizedPattern.includes("*")) {
+      return normalizedOrigin === normalizedPattern;
+    }
+
+    // Supports patterns like https://*.vercel.app
+    if (normalizedPattern.startsWith("http://*.") || normalizedPattern.startsWith("https://*.")) {
+      const prefix = normalizedPattern.startsWith("https://*.") ? "https://" : "http://";
+      const baseDomain = normalizedPattern.slice(prefix.length + 2);
+
+      if (!normalizedOrigin.startsWith(prefix)) {
+        return false;
+      }
+
+      const originHost = normalizedOrigin.slice(prefix.length);
+      return originHost === baseDomain || originHost.endsWith(`.${baseDomain}`);
+    }
+
+    return false;
+  }
+
   return (origin: string | undefined, cb: (err: Error | null, allow: boolean) => void) => {
     // Allow non-browser/server-to-server requests with no origin header.
     if (!origin) {
@@ -27,7 +59,7 @@ function buildAllowedOrigins() {
       return;
     }
 
-    if (staticOrigins.includes(origin)) {
+    if (staticOrigins.some((allowed) => isAllowedByPattern(origin, allowed))) {
       cb(null, true);
       return;
     }
