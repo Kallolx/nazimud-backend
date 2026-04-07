@@ -131,3 +131,21 @@ LOCAL_UPLOAD_DIR=/var/www/backseek/uploads
 In local mode uploaded files are served from:
 
 - `GET /api/uploads/:name`
+
+## Account Deletion Hold (7 Days)
+
+- User deletion request removes their posts/images immediately.
+- Account is locked (`isBanned=true`) and scheduled for permanent deletion after 7 days.
+- Admin can restore account during hold by unbanning the user.
+
+Run cleanup processor manually:
+
+```bash
+npm run deletion:process-holds
+```
+
+Recommended cron (daily at 2:10 AM):
+
+```bash
+10 2 * * * cd /home/azureuser/backseek-backend ; npm run deletion:process-holds >> /home/azureuser/backups/deletion-holds.log 2>&1
+```

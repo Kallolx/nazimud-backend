@@ -2,7 +2,7 @@ import { FastifyPluginAsync } from "fastify";
 import { prisma } from "../db/prisma";
 import { requireAdmin } from "../utils/auth";
 import { comparePassword } from "../utils/password";
-import { deleteImage } from "../utils/cloudinary";
+import { hardDeletePost } from "../utils/post-delete";
 
 const POST_STATUS_PENDING = "PENDING";
 const POST_STATUS_ACTIVE = "ACTIVE";
@@ -233,6 +233,29 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
       },
     });
 
+    if (!updated.isBanned) {
+      const pendingDelete = await prisma.adminAction.findFirst({
+        where: {
+          actionType: "account_delete_requested",
+          targetType: "user",
+          targetId: updated.id,
+        },
+        orderBy: { createdAt: "desc" },
+        select: { id: true },
+      });
+
+      if (pendingDelete) {
+        await prisma.adminAction.create({
+          data: {
+            adminId: request.user.id,
+            actionType: "account_delete_restored",
+            targetType: "user",
+            targetId: updated.id,
+          },
+        });
+      }
+    }
+
     return { success: true, user: updated };
   });
 
@@ -448,11 +471,11 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
       return reply.code(404).send({ message: "Post not found" });
     }
 
-    await Promise.all(existing.images.map((image: any) => deleteImage(image.cloudinaryPublicId)));
-
-    await prisma.post.update({
-      where: { id: postId },
-      data: { status: POST_STATUS_DELETED },
+    await hardDeletePost({
+      id: existing.id,
+      images: existing.images.map((image: any) => ({
+        cloudinaryPublicId: image.cloudinaryPublicId,
+      })),
     });
 
     await prisma.adminAction.create({

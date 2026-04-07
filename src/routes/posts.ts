@@ -2,6 +2,7 @@ import { FastifyPluginAsync } from "fastify";
 import { prisma } from "../db/prisma";
 import { requireAuth } from "../utils/auth";
 import { deleteImage, uploadImageBuffer } from "../utils/cloudinary";
+import { hardDeletePost } from "../utils/post-delete";
 
 const AD_TYPE_FREE = "FREE";
 const AD_TYPE_PREMIUM = "PREMIUM";
@@ -395,11 +396,11 @@ export const postRoutes: FastifyPluginAsync = async (app) => {
       return reply.code(403).send({ message: "You are not allowed to delete this post" });
     }
 
-    await Promise.all(existing.images.map((image: any) => deleteImage(image.cloudinaryPublicId)));
-
-    await prisma.post.update({
-      where: { id: postId },
-      data: { status: POST_STATUS_DELETED },
+    await hardDeletePost({
+      id: existing.id,
+      images: existing.images.map((image: any) => ({
+        cloudinaryPublicId: image.cloudinaryPublicId,
+      })),
     });
 
     return { success: true };
