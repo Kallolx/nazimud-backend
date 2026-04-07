@@ -1,13 +1,14 @@
 import { FastifyPluginAsync } from "fastify";
 import { prisma } from "../db/prisma";
 import { requireAdmin } from "../utils/auth";
-import { comparePassword } from "../utils/password";
+import { comparePassword, hashPassword } from "../utils/password";
 import { hardDeletePost } from "../utils/post-delete";
 
 const POST_STATUS_PENDING = "PENDING";
 const POST_STATUS_ACTIVE = "ACTIVE";
 const POST_STATUS_REJECTED = "REJECTED";
 const POST_STATUS_DELETED = "DELETED";
+const USER_ACTIVITY_LOG_LIMIT = 8;
 
 async function verifyAdminPassword(adminId: number, adminPassword: string): Promise<boolean> {
   if (!adminPassword) return false;
@@ -19,6 +20,103 @@ async function verifyAdminPassword(adminId: number, adminPassword: string): Prom
 }
 
 export const adminRoutes: FastifyPluginAsync = async (app) => {
+  app.patch("/me", { preHandler: [requireAdmin] }, async (request, reply) => {
+    const body = (request.body ?? {}) as {
+      username?: string;
+      email?: string;
+      currentPassword?: string;
+      newPassword?: string;
+    };
+
+    const username = String(body.username ?? "").trim();
+    const email = String(body.email ?? "").trim().toLowerCase();
+    const currentPassword = String(body.currentPassword ?? "");
+    const newPassword = String(body.newPassword ?? "");
+
+    if (!username) {
+      return reply.code(400).send({ message: "Username is required" });
+    }
+
+    if (!/^[a-zA-Z0-9_]{3,32}$/.test(username)) {
+      return reply.code(400).send({ message: "Username must be 3-32 chars and use letters, numbers, or underscore" });
+    }
+
+    if (!email || !/^\S+@\S+\.\S+$/.test(email)) {
+      return reply.code(400).send({ message: "Valid email is required" });
+    }
+
+    if (newPassword && newPassword.length < 8) {
+      return reply.code(400).send({ message: "New password must be at least 8 characters" });
+    }
+
+    const admin = await prisma.user.findUnique({ where: { id: request.user.id } });
+    if (!admin) {
+      return reply.code(404).send({ message: "Admin account not found" });
+    }
+
+    if (newPassword) {
+      const ok = await comparePassword(currentPassword, admin.passwordHash);
+      if (!ok) {
+        return reply.code(403).send({ message: "Current password is incorrect" });
+      }
+    }
+
+    const emailTaken = await prisma.user.findFirst({
+      where: {
+        email,
+        id: { not: admin.id },
+      },
+      select: { id: true },
+    });
+
+    if (emailTaken) {
+      return reply.code(409).send({ message: "Email already in use" });
+    }
+
+    const usernameTaken = await prisma.user.findFirst({
+      where: {
+        username,
+        id: { not: admin.id },
+      },
+      select: { id: true },
+    });
+
+    if (usernameTaken) {
+      return reply.code(409).send({ message: "Username already in use" });
+    }
+
+    const data: any = {
+      username,
+      email,
+    };
+
+    if (newPassword) {
+      data.passwordHash = await hashPassword(newPassword);
+    }
+
+    const updated = await prisma.user.update({
+      where: { id: admin.id },
+      data,
+      select: {
+        id: true,
+        email: true,
+        username: true,
+        role: true,
+      },
+    });
+
+    await prisma.adminAction.create({
+      data: {
+        adminId: admin.id,
+        actionType: "update_admin_profile",
+        targetType: "user",
+        targetId: admin.id,
+      },
+    });
+
+    return { success: true, user: updated };
+  });
+
   app.get("/users", { preHandler: [requireAdmin] }, async (request) => {
     const query = request.query as { page?: string; limit?: string; keyword?: string };
     const page = Math.max(Number(query.page ?? 1), 1);
@@ -147,7 +245,9 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
         ipAddress: null,
         createdAt: item.createdAt,
       })),
-    ].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    ]
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .slice(0, USER_ACTIVITY_LOG_LIMIT);
 
     const lastIp = authActions.find((item) => item.reason)?.reason ?? null;
     const lastLoginAt =
