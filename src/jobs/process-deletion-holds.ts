@@ -1,7 +1,9 @@
 import { prisma } from "../db/prisma";
+import { hardDeletePost } from "../utils/post-delete";
 import { hardDeleteUserAccount } from "../utils/user-delete";
 
 const HOLD_DAYS = 7;
+const POST_STATUS_DELETED = "DELETED";
 
 function parseDeleteAfter(reason?: string | null, createdAt?: Date): Date {
   const match = String(reason || "").match(/^delete_after:(.+)$/i);
@@ -18,6 +20,49 @@ function parseDeleteAfter(reason?: string | null, createdAt?: Date): Date {
 }
 
 async function run(): Promise<void> {
+  const now = new Date();
+
+  const postRequests = await prisma.adminAction.findMany({
+    where: {
+      actionType: "post_delete_requested",
+      targetType: "post",
+    },
+    orderBy: { createdAt: "desc" },
+  });
+
+  const latestPostRequestById = new Map<number, (typeof postRequests)[number]>();
+  for (const item of postRequests) {
+    if (!latestPostRequestById.has(item.targetId)) {
+      latestPostRequestById.set(item.targetId, item);
+    }
+  }
+
+  for (const requestAction of latestPostRequestById.values()) {
+    const deleteAfter = parseDeleteAfter(requestAction.reason, requestAction.createdAt);
+    if (deleteAfter > now) {
+      continue;
+    }
+
+    const post = await prisma.post.findUnique({
+      where: { id: requestAction.targetId },
+      include: {
+        images: {
+          select: { cloudinaryPublicId: true },
+        },
+      },
+    });
+
+    // Admin changed status during hold period, so skip permanent deletion.
+    if (!post || post.status !== POST_STATUS_DELETED) {
+      continue;
+    }
+
+    await hardDeletePost({
+      id: post.id,
+      images: post.images,
+    });
+  }
+
   const requests = await prisma.adminAction.findMany({
     where: {
       actionType: "account_delete_requested",
@@ -32,8 +77,6 @@ async function run(): Promise<void> {
       latestByUser.set(item.targetId, item);
     }
   }
-
-  const now = new Date();
 
   for (const requestAction of latestByUser.values()) {
     const deleteAfter = parseDeleteAfter(requestAction.reason, requestAction.createdAt);

@@ -9,6 +9,7 @@ const AD_TYPE_PREMIUM = "PREMIUM";
 const POST_STATUS_PENDING = "PENDING";
 const POST_STATUS_ACTIVE = "ACTIVE";
 const POST_STATUS_DELETED = "DELETED";
+const POST_DELETION_HOLD_DAYS = 7;
 
 type MultipartExtracted = {
   fields: Record<string, string>;
@@ -396,13 +397,40 @@ export const postRoutes: FastifyPluginAsync = async (app) => {
       return reply.code(403).send({ message: "You are not allowed to delete this post" });
     }
 
-    await hardDeletePost({
-      id: existing.id,
-      images: existing.images.map((image: any) => ({
-        cloudinaryPublicId: image.cloudinaryPublicId,
-      })),
+    if (request.user.role === "ADMIN") {
+      await hardDeletePost({
+        id: existing.id,
+        images: existing.images.map((image: any) => ({
+          cloudinaryPublicId: image.cloudinaryPublicId,
+        })),
+      });
+
+      return { success: true, hardDeleted: true };
+    }
+
+    const deleteAfter = new Date(Date.now() + POST_DELETION_HOLD_DAYS * 24 * 60 * 60 * 1000);
+
+    await prisma.post.update({
+      where: { id: existing.id },
+      data: { status: POST_STATUS_DELETED },
     });
 
-    return { success: true };
+    await prisma.adminAction.create({
+      data: {
+        adminId: request.user.id,
+        actionType: "post_delete_requested",
+        targetType: "post",
+        targetId: existing.id,
+        reason: `delete_after:${deleteAfter.toISOString()}`,
+      },
+    });
+
+    return {
+      success: true,
+      holdDays: POST_DELETION_HOLD_DAYS,
+      scheduledDeletionAt: deleteAfter.toISOString(),
+      status: POST_STATUS_DELETED,
+      hardDeleted: false,
+    };
   });
 };

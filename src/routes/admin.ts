@@ -281,8 +281,11 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
       });
     }
 
-    if (query.status && query.status !== "ALL") {
-      andFilters.push({ status: query.status });
+    const requestedStatus = String(query.status ?? "").toUpperCase();
+    if (requestedStatus && requestedStatus !== "ALL") {
+      andFilters.push({ status: requestedStatus });
+    } else {
+      andFilters.push({ status: { not: POST_STATUS_DELETED } });
     }
 
     if (query.postedOn) {

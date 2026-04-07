@@ -67,7 +67,10 @@ export const userRoutes: FastifyPluginAsync = async (app) => {
 
   app.get("/me/posts", { preHandler: [requireAuth] }, async (request) => {
     const posts = await prisma.post.findMany({
-      where: { ownerId: request.user.id },
+      where: {
+        ownerId: request.user.id,
+        status: { not: "DELETED" },
+      },
       orderBy: { postedAt: "desc" },
       include: { images: { orderBy: { displayOrder: "asc" } } },
     });
