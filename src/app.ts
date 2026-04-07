@@ -9,6 +9,7 @@ import { authRoutes } from "./routes/auth";
 import { postRoutes } from "./routes/posts";
 import { userRoutes } from "./routes/users";
 import { adminRoutes } from "./routes/admin";
+import { uploadRoutes } from "./routes/uploads";
 
 function buildAllowedOrigins() {
   if (env.CLIENT_ORIGIN === "*") {
@@ -70,6 +71,7 @@ export function buildApp() {
   });
 
   app.register(healthRoutes, { prefix: "/api" });
+  app.register(uploadRoutes, { prefix: "/api" });
   app.register(authRoutes, { prefix: "/api/auth" });
   app.register(postRoutes, { prefix: "/api/posts" });
   app.register(userRoutes, { prefix: "/api/users" });

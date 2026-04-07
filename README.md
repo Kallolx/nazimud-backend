@@ -112,3 +112,22 @@ Example JSON string field value:
 ```json
 {"orientation":"straight","lookingFor":"men"}
 ```
+
+## Image Storage Modes
+
+Backend supports two image storage modes via `.env`:
+
+- `IMAGE_STORAGE=cloudinary` (default)
+- `IMAGE_STORAGE=local` (store on VPS disk)
+
+For local mode, set:
+
+```env
+IMAGE_STORAGE=local
+PUBLIC_BASE_URL=https://backseek.onedigitalspot.com
+LOCAL_UPLOAD_DIR=/var/www/backseek/uploads
+```
+
+In local mode uploaded files are served from:
+
+- `GET /api/uploads/:name`
