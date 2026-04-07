@@ -1,0 +1,143 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+enum PostStatus {
+  PENDING
+  ACTIVE
+  EXPIRED
+  REJECTED
+  DELETED
+}
+
+enum AdType {
+  FREE
+  PREMIUM
+}
+
+model User {
+  id              Int           @id @default(autoincrement())
+  email           String        @unique
+  username        String        @unique
+  passwordHash    String
+  age             Int
+  role            UserRole      @default(USER)
+  accountBalance  Decimal       @default(0) @db.Decimal(10, 2)
+  emailVerified   Boolean       @default(false)
+  isBanned        Boolean       @default(false)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  posts           Post[]
+  reports         PostReport[]
+  refreshTokens   RefreshToken[]
+  adminActions    AdminAction[]
+}
+
+model Post {
+  id               Int         @id @default(autoincrement())
+  ownerId          Int
+  owner            User        @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  category         String
+  subcategory      String
+  title            String
+  description      String
+  topText          String?
+  age              Int?
+  locationText     String?
+  phoneNumber      String?
+  contactEmail     String?
+  country          String      @default("usa")
+  state            String
+  city             String
+  adType           AdType      @default(FREE)
+  status           PostStatus  @default(PENDING)
+  isSponsored      Boolean     @default(false)
+  postedAt         DateTime    @default(now())
+  expiresAt        DateTime?
+  casualDetails    Json?
+  rentalDetails    Json?
+  petDetails       Json?
+  serviceDetails   Json?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+  images           PostImage[]
+  reports          PostReport[]
+
+  @@index([category])
+  @@index([state, city])
+  @@index([status])
+  @@index([postedAt])
+}
+
+model PostReport {
+  id              Int      @id @default(autoincrement())
+  postId          Int
+  post            Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  reporterUserId  Int?
+  reporterUser    User?    @relation(fields: [reporterUserId], references: [id], onDelete: SetNull)
+  reporterEmail   String?
+  reporterIp      String?
+  reason          String
+  details         String?
+  status          String   @default("OPEN")
+  createdAt       DateTime @default(now())
+  resolvedAt      DateTime?
+  resolvedById    Int?
+
+  @@index([postId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("reports")
+}
+
+model PostImage {
+  id                 Int      @id @default(autoincrement())
+  postId             Int
+  post               Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  url                String
+  secureUrl          String
+  cloudinaryPublicId String
+  width              Int?
+  height             Int?
+  format             String?
+  bytes              Int?
+  displayOrder       Int      @default(0)
+  createdAt          DateTime @default(now())
+
+  @@index([postId])
+}
+
+model RefreshToken {
+  id        Int      @id @default(autoincrement())
+  token     String   @unique
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+model AdminAction {
+  id         Int      @id @default(autoincrement())
+  adminId    Int
+  admin      User     @relation(fields: [adminId], references: [id], onDelete: Cascade)
+  actionType String
+  targetType String
+  targetId   Int
+  reason     String?
+  createdAt  DateTime @default(now())
+
+  @@index([adminId])
+  @@index([actionType])
+}
