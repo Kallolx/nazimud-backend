@@ -86,7 +86,9 @@ export function buildApp() {
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   });
 
-  app.register(helmet);
+  app.register(helmet, {
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+  });
 
   app.register(jwt, {
     secret: env.JWT_SECRET,
