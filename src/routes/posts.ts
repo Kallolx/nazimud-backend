@@ -10,6 +10,16 @@ const POST_STATUS_PENDING = "PENDING";
 const POST_STATUS_ACTIVE = "ACTIVE";
 const POST_STATUS_DELETED = "DELETED";
 const POST_DELETION_HOLD_DAYS = 7;
+const PREMIUM_AD_COST_USD = 10;
+const PREMIUM_AD_DURATION_DAYS = 15;
+
+function parseRequestedAdType(value?: string): "FREE" | "PREMIUM" {
+  return String(value || "").trim().toUpperCase() === AD_TYPE_PREMIUM ? AD_TYPE_PREMIUM : AD_TYPE_FREE;
+}
+
+function getPremiumExpiresAt(): Date {
+  return new Date(Date.now() + PREMIUM_AD_DURATION_DAYS * 24 * 60 * 60 * 1000);
+}
 
 type MultipartExtracted = {
   fields: Record<string, string>;
@@ -68,6 +78,13 @@ async function getOptionalRequestUser(request: any): Promise<{ id: number; role:
 
 function mapPost(post: any) {
   const casualDetails = post.casualDetails ?? null;
+  const now = Date.now();
+  const expiresAtMs = post.expiresAt ? new Date(post.expiresAt).getTime() : 0;
+  const sponsoredActive =
+    post.adType === AD_TYPE_PREMIUM &&
+    Boolean(post.isSponsored) &&
+    Number.isFinite(expiresAtMs) &&
+    expiresAtMs > now;
 
   return {
     id: post.id,
@@ -87,6 +104,8 @@ function mapPost(post: any) {
     contactEmail: post.contactEmail,
     status: post.status,
     adType: post.adType,
+    isSponsored: sponsoredActive,
+    sponsoredUntil: post.expiresAt ?? null,
     date: new Date(post.postedAt).toLocaleDateString("en-US", {
       month: "short",
       day: "2-digit",
@@ -172,10 +191,24 @@ export const postRoutes: FastifyPluginAsync = async (app) => {
       ];
     }
 
+    const now = new Date();
+
+    // Auto-demote expired premium posts before listing so ordering stays correct.
+    await prisma.post.updateMany({
+      where: {
+        adType: AD_TYPE_PREMIUM,
+        isSponsored: true,
+        expiresAt: { lte: now },
+      },
+      data: {
+        isSponsored: false,
+      },
+    });
+
     const [items, total] = await Promise.all([
       prisma.post.findMany({
         where,
-        orderBy: { postedAt: "desc" },
+        orderBy: [{ isSponsored: "desc" }, { postedAt: "desc" }],
         skip: (page - 1) * limit,
         take: limit,
         include: { images: { orderBy: { displayOrder: "asc" } } },
@@ -278,39 +311,79 @@ export const postRoutes: FastifyPluginAsync = async (app) => {
       return reply.code(400).send({ message: `Missing required fields: ${missing.join(", ")}` });
     }
 
-    const post = await prisma.post.create({
-      data: {
-        ownerId: request.user.id,
-        category: fields.category,
-        subcategory: fields.subcategory,
-        title: fields.title,
-        description: fields.description,
-        topText: fields.topText || null,
-        age: fields.age ? Number(fields.age) : null,
-        locationText: fields.location || null,
-        phoneNumber: fields.phone || fields.phoneNumber || null,
-        contactEmail: fields.contactEmail || request.user.email,
-        country: fields.country || "usa",
-        state: fields.state,
-        city: fields.city,
-        adType: fields.adType?.toUpperCase() === AD_TYPE_PREMIUM || fields.adType?.toLowerCase() === "premium" ? AD_TYPE_PREMIUM : AD_TYPE_FREE,
-        status: POST_STATUS_PENDING,
-        isSponsored: fields.adType?.toLowerCase() === "premium",
-        casualDetails: parseJsonOrNull(fields.casualDetails),
-        rentalDetails: parseJsonOrNull(fields.rentalDetails),
-        petDetails: parseJsonOrNull(fields.petDetails),
-        serviceDetails: parseJsonOrNull(fields.serviceDetails),
-        images: {
-          create: uploadedImages.map((image, index) => ({
-            ...image,
-            displayOrder: index,
-          })),
+    const requestedAdType = parseRequestedAdType(fields.adType);
+    const wantsPremium = requestedAdType === AD_TYPE_PREMIUM;
+
+    const post = await prisma.$transaction(async (tx) => {
+      const owner = await tx.user.findUnique({
+        where: { id: request.user.id },
+        select: { accountBalance: true, email: true },
+      });
+
+      if (!owner) {
+        throw new Error("OWNER_NOT_FOUND");
+      }
+
+      if (wantsPremium) {
+        const balance = Number(owner.accountBalance ?? 0);
+        if (balance < PREMIUM_AD_COST_USD) {
+          throw new Error("INSUFFICIENT_BALANCE");
+        }
+
+        await tx.user.update({
+          where: { id: request.user.id },
+          data: {
+            accountBalance: { decrement: PREMIUM_AD_COST_USD },
+          },
+        });
+      }
+
+      return tx.post.create({
+        data: {
+          ownerId: request.user.id,
+          category: fields.category,
+          subcategory: fields.subcategory,
+          title: fields.title,
+          description: fields.description,
+          topText: fields.topText || null,
+          age: fields.age ? Number(fields.age) : null,
+          locationText: fields.location || null,
+          phoneNumber: fields.phone || fields.phoneNumber || null,
+          contactEmail: fields.contactEmail || owner.email,
+          country: fields.country || "usa",
+          state: fields.state,
+          city: fields.city,
+          adType: requestedAdType,
+          status: POST_STATUS_PENDING,
+          isSponsored: wantsPremium,
+          expiresAt: wantsPremium ? getPremiumExpiresAt() : null,
+          casualDetails: parseJsonOrNull(fields.casualDetails),
+          rentalDetails: parseJsonOrNull(fields.rentalDetails),
+          petDetails: parseJsonOrNull(fields.petDetails),
+          serviceDetails: parseJsonOrNull(fields.serviceDetails),
+          images: {
+            create: uploadedImages.map((image, index) => ({
+              ...image,
+              displayOrder: index,
+            })),
+          },
         },
-      },
-      include: {
-        images: { orderBy: { displayOrder: "asc" } },
-      },
+        include: {
+          images: { orderBy: { displayOrder: "asc" } },
+        },
+      });
+    }).catch((error: any) => {
+      if (error instanceof Error && error.message === "INSUFFICIENT_BALANCE") {
+        return null;
+      }
+      throw error;
     });
+
+    if (!post) {
+      return reply.code(402).send({
+        message: `Insufficient credits. Premium ads cost $${PREMIUM_AD_COST_USD} for ${PREMIUM_AD_DURATION_DAYS} days.`,
+      });
+    }
 
     return reply.code(201).send(mapPost(post));
   });
@@ -359,6 +432,34 @@ export const postRoutes: FastifyPluginAsync = async (app) => {
       });
     }
 
+    const requestedAdType =
+      fields.adType !== undefined ? parseRequestedAdType(fields.adType) : (existing.adType as "FREE" | "PREMIUM");
+    const existingPremiumActive =
+      existing.adType === AD_TYPE_PREMIUM &&
+      Boolean(existing.isSponsored) &&
+      (!!existing.expiresAt && new Date(existing.expiresAt).getTime() > Date.now());
+    const renewingPremium = requestedAdType === AD_TYPE_PREMIUM && !existingPremiumActive;
+
+    if (renewingPremium) {
+      const owner = await prisma.user.findUnique({
+        where: { id: existing.ownerId },
+        select: { accountBalance: true },
+      });
+      const balance = Number(owner?.accountBalance ?? 0);
+      if (balance < PREMIUM_AD_COST_USD) {
+        return reply.code(402).send({
+          message: `Insufficient credits. Premium ads cost $${PREMIUM_AD_COST_USD} for ${PREMIUM_AD_DURATION_DAYS} days.`,
+        });
+      }
+
+      await prisma.user.update({
+        where: { id: existing.ownerId },
+        data: {
+          accountBalance: { decrement: PREMIUM_AD_COST_USD },
+        },
+      });
+    }
+
     const updateData: any = {
       category: fields.category ?? existing.category,
       subcategory: fields.subcategory ?? existing.subcategory,
@@ -373,12 +474,9 @@ export const postRoutes: FastifyPluginAsync = async (app) => {
       country: fields.country ?? existing.country,
       state: fields.state ?? existing.state,
       city: fields.city ?? existing.city,
-      adType:
-        fields.adType?.toLowerCase() === "premium"
-          ? AD_TYPE_PREMIUM
-          : fields.adType?.toLowerCase() === "free"
-            ? AD_TYPE_FREE
-            : existing.adType,
+      adType: requestedAdType,
+      isSponsored: requestedAdType === AD_TYPE_PREMIUM,
+      expiresAt: requestedAdType === AD_TYPE_PREMIUM ? (renewingPremium ? getPremiumExpiresAt() : existing.expiresAt ?? getPremiumExpiresAt()) : null,
       images: {
         create: uploadedImages.map((image, index) => ({
           ...image,

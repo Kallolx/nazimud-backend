@@ -9,6 +9,12 @@ const POST_STATUS_ACTIVE = "ACTIVE";
 const POST_STATUS_REJECTED = "REJECTED";
 const POST_STATUS_DELETED = "DELETED";
 const USER_ACTIVITY_LOG_LIMIT = 8;
+const AD_TYPE_PREMIUM = "PREMIUM";
+const PREMIUM_AD_DURATION_DAYS = 15;
+
+function getPremiumExpiresAt(): Date {
+  return new Date(Date.now() + PREMIUM_AD_DURATION_DAYS * 24 * 60 * 60 * 1000);
+}
 
 async function verifyAdminPassword(adminId: number, adminPassword: string): Promise<boolean> {
   if (!adminPassword) return false;
@@ -495,12 +501,37 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
     };
   });
 
-  app.post("/posts/:id/approve", { preHandler: [requireAdmin] }, async (request) => {
+  app.post("/posts/:id/approve", { preHandler: [requireAdmin] }, async (request, reply) => {
     const { id } = request.params as { id: string };
 
-    const post = await prisma.post.update({
+    const existing = await prisma.post.findUnique({
       where: { id: Number(id) },
-      data: { status: POST_STATUS_ACTIVE },
+      select: {
+        id: true,
+        adType: true,
+        expiresAt: true,
+      },
+    });
+
+    if (!existing) {
+      return reply.code(404).send({ message: "Post not found" });
+    }
+
+    const shouldActivatePremium =
+      existing.adType === AD_TYPE_PREMIUM &&
+      (!existing.expiresAt || new Date(existing.expiresAt).getTime() <= Date.now());
+
+    const post = await prisma.post.update({
+      where: { id: existing.id },
+      data: {
+        status: POST_STATUS_ACTIVE,
+        isSponsored: existing.adType === AD_TYPE_PREMIUM,
+        expiresAt: existing.adType === AD_TYPE_PREMIUM
+          ? shouldActivatePremium
+            ? getPremiumExpiresAt()
+            : existing.expiresAt
+          : null,
+      },
     });
 
     await prisma.adminAction.create({
