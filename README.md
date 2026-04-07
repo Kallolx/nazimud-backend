@@ -1,4 +1,4 @@
-# BackpageSeek Backend
+# XEscortSeek Backend
 
 Production-style backend scaffold for your existing frontend UI.
 

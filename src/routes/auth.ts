@@ -12,13 +12,13 @@ const registerSchema = z.object({
   username: z.string().min(3).max(32).regex(/^[a-zA-Z0-9_]+$/),
   password: z.string().min(8),
   age: z.number().int().min(19),
-  captchaToken: z.string().min(10),
+  captchaToken: z.string().min(1),
 });
 
 const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8),
-  captchaToken: z.string().min(10),
+  captchaToken: z.string().min(1),
 });
 
 const refreshSchema = z.object({
@@ -98,6 +98,19 @@ function isAllowedEmailDomain(email: string): boolean {
 }
 
 async function verifyTurnstileOrReject(request: any, reply: any, token: string): Promise<boolean> {
+  if (!String(token || "").trim()) {
+    reply.code(400).send({ message: "Captcha token is required." });
+    return false;
+  }
+
+  if (env.CAPTCHA_MODE === "mock" && env.NODE_ENV !== "production") {
+    if (String(token).trim() !== env.LOCAL_CAPTCHA_TOKEN) {
+      reply.code(400).send({ message: "Please complete local captcha checkbox." });
+      return false;
+    }
+    return true;
+  }
+
   if (!env.TURNSTILE_SECRET_KEY) {
     reply.code(503).send({ message: "Captcha is not configured on server." });
     return false;

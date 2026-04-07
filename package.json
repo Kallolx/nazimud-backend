@@ -1,7 +1,7 @@
 {
-  "name": "backpageseek-backend",
+  "name": "XEscortSeek-backend",
   "version": "1.0.0",
-  "description": "BackpageSeek backend API",
+  "description": "XEscortSeek backend API",
   "main": "dist/server.js",
   "scripts": {
     "dev": "tsx watch src/server.ts",
