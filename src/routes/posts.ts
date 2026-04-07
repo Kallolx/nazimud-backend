@@ -49,6 +49,23 @@ async function getOptionalReporterUserId(request: any): Promise<number | null> {
   }
 }
 
+async function getOptionalRequestUser(request: any): Promise<{ id: number; role: string } | null> {
+  const authHeader = String(request.headers?.authorization || "");
+  if (!authHeader.toLowerCase().startsWith("bearer ")) {
+    return null;
+  }
+
+  try {
+    const payload = await request.jwtVerify();
+    const id = Number((payload as any)?.id);
+    const role = String((payload as any)?.role || "USER").toUpperCase();
+    if (!Number.isFinite(id) || id <= 0) return null;
+    return { id, role };
+  } catch {
+    return null;
+  }
+}
+
 function mapPost(post: any) {
   const casualDetails = post.casualDetails ?? null;
 
@@ -185,8 +202,18 @@ export const postRoutes: FastifyPluginAsync = async (app) => {
       },
     });
 
-    if (!post || post.status === POST_STATUS_DELETED) {
+    if (!post) {
       return reply.code(404).send({ message: "Post not found" });
+    }
+
+    if (post.status === POST_STATUS_DELETED) {
+      const sessionUser = await getOptionalRequestUser(request);
+      const isOwner = sessionUser?.id === post.ownerId;
+      const isAdmin = sessionUser?.role === "ADMIN";
+
+      if (!isOwner && !isAdmin) {
+        return reply.code(404).send({ message: "Post not found" });
+      }
     }
 
     return mapPost(post);
@@ -297,7 +324,7 @@ export const postRoutes: FastifyPluginAsync = async (app) => {
       include: { images: true },
     });
 
-    if (!existing || existing.status === POST_STATUS_DELETED) {
+    if (!existing) {
       return reply.code(404).send({ message: "Post not found" });
     }
 
@@ -337,6 +364,7 @@ export const postRoutes: FastifyPluginAsync = async (app) => {
       subcategory: fields.subcategory ?? existing.subcategory,
       title: fields.title ?? existing.title,
       description: fields.description ?? existing.description,
+      status: existing.status === POST_STATUS_DELETED ? POST_STATUS_PENDING : existing.status,
       topText: fields.topText ?? existing.topText,
       age: fields.age ? Number(fields.age) : existing.age,
       locationText: fields.location ?? existing.locationText,

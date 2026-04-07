@@ -440,7 +440,7 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
     const body = (request.body ?? {}) as { status?: string };
     const status = String(body.status ?? "").toUpperCase();
 
-    if (![POST_STATUS_PENDING, POST_STATUS_ACTIVE, POST_STATUS_REJECTED, POST_STATUS_DELETED].includes(status)) {
+    if (![POST_STATUS_PENDING, POST_STATUS_ACTIVE, POST_STATUS_REJECTED].includes(status)) {
       return reply.code(400).send({ message: "Invalid status value" });
     }
 
